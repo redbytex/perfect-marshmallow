@@ -71,84 +71,35 @@
   }
   .score-value.danger { color: #ff8a3d; }
 
-  .controls-bottom {
+  /* Drag zone covers the entire viewport — pointer events on this control rotation/tilt.
+     The finish button sits above it (higher z-index + pointer-events: auto). */
+  #drag-zone {
     position: fixed;
-    bottom: max(40px, env(safe-area-inset-bottom));
-    z-index: 20;
-    pointer-events: none;
-  }
-  #joystick-zone {
-    left: max(28px, env(safe-area-inset-left));
-    width: 130px;
-    height: 130px;
-  }
-  /* Rotate buttons now horizontal, L then R */
-  #rotate-zone {
-    right: max(28px, env(safe-area-inset-right));
-    display: flex;
-    flex-direction: row;
-    gap: 14px;
-    align-items: center;
-  }
-  .control-base {
-    border-radius: 50%;
-    border: 1px solid rgba(244, 228, 193, 0.22);
-    background: rgba(244, 228, 193, 0.04);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    pointer-events: auto;
+    inset: 0;
+    z-index: 5;
     touch-action: none;
-    transition: all 0.1s;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #f4e4c1;
+    cursor: grab;
+    transition: opacity 0.4s;
   }
-  #joystick-base { width: 100%; height: 100%; }
-  #joystick-stick {
-    position: absolute;
-    width: 52px; height: 52px;
-    border-radius: 50%;
-    background: rgba(244, 228, 193, 0.7);
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    transition: transform 0.15s ease-out;
-    pointer-events: none;
-    box-shadow: 0 0 18px rgba(244, 228, 193, 0.3);
-  }
+  #drag-zone.dragging { cursor: grabbing; }
+  #drag-zone.hidden { opacity: 0; pointer-events: none; }
 
-  .rotate-btn {
-    width: 76px;
-    height: 76px;
-    font-family: 'Cormorant Garamond', serif;
-    font-style: italic;
-    font-size: 19px;
-    font-weight: 400;
-    letter-spacing: 0.06em;
-    cursor: pointer;
-    color: rgba(244, 228, 193, 0.7);
-  }
-  .rotate-btn .arrow {
-    font-size: 22px;
-    margin-right: 4px;
-    opacity: 0.85;
-  }
-  .rotate-btn.active {
-    background: rgba(244, 228, 193, 0.16);
-    border-color: rgba(244, 228, 193, 0.7);
-    color: #f4e4c1;
-    box-shadow: 0 0 26px rgba(244, 228, 193, 0.18);
-  }
-  .rotate-btn:active { transform: scale(0.95); }
-
-  .ctl-label {
-    position: absolute;
-    bottom: -22px; left: 50%; transform: translateX(-50%);
-    font-size: 8px; letter-spacing: 0.4em; opacity: 0.4;
+  /* Subtle hint dots in corners to suggest "drag to rotate" — fade after first interaction */
+  #drag-hint {
+    position: fixed;
+    bottom: 110px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.4em;
     text-transform: uppercase;
-    white-space: nowrap;
+    color: rgba(244, 228, 193, 0.35);
+    pointer-events: none;
+    z-index: 6;
+    transition: opacity 0.4s;
   }
+  #drag-hint.faded { opacity: 0; }
 
   #finish-btn {
     position: fixed;
@@ -192,27 +143,27 @@
     padding: 40px;
     transition: opacity 0.6s;
   }
-  /* End-screen is anchored to the right half so the rotated marshmallow
-     stays visible on the left half of the canvas. */
+  /* End-screen is positioned with its CENTER at ~70% of viewport width, so the
+     score sits in the middle-right of the screen rather than hugging the edge.
+     The marshmallow occupies ~30% on the left. Both feel "near center" together. */
   #end-screen {
     position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 50vw;
+    top: 50%;
+    left: 70%;
+    transform: translate(-50%, -50%);
     z-index: 100;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-direction: column;
     text-align: center;
-    padding: 40px;
+    padding: 24px;
     background: rgba(5, 8, 16, 0);
-    transform: translateX(0);
     transition: transform 0.7s cubic-bezier(.4, 0, .2, 1), opacity 0.5s;
+    max-width: 44vw;
   }
   #end-screen.hidden {
-    transform: translateX(110%);
+    transform: translate(110%, -50%);
     opacity: 0;
     pointer-events: none;
   }
@@ -382,10 +333,6 @@
   }
 
   @media (max-width: 600px) {
-    #joystick-zone { width: 110px; height: 110px; }
-    #joystick-stick { width: 44px; height: 44px; }
-    .rotate-btn { width: 64px; height: 64px; font-size: 16px; }
-    #rotate-zone { gap: 10px; }
     .score-value { font-size: 48px; }
   }
 </style>
@@ -401,17 +348,8 @@
     <div class="score-value" id="score-num">0</div>
   </div>
 
-  <div id="joystick-zone" class="controls-bottom">
-    <div id="joystick-base" class="control-base">
-      <div id="joystick-stick"></div>
-    </div>
-    <div class="ctl-label">Move</div>
-  </div>
-
-  <div id="rotate-zone" class="controls-bottom">
-    <button class="rotate-btn control-base" id="rot-left-btn"><span class="arrow">↺</span>L</button>
-    <button class="rotate-btn control-base" id="rot-right-btn"><span class="arrow">↻</span>R</button>
-  </div>
+  <div id="drag-zone"></div>
+  <div id="drag-hint">drag to rotate &amp; tilt</div>
 
   <button id="finish-btn">Finish</button>
 
@@ -452,14 +390,7 @@ const MESH_DATA = {"skewer":{"positions":[0.0002,0.0004,0.0457,0.0002,-3.6658,0.
 const CONFIG = {
   IGNITE: 150,
   HEAT_RATE: 54,
-  ROTATE_SPEED: 1.4,
   REVEAL_DURATION: 1.0,
-  // Joystick maps to position in the world. From the low first-person POV:
-  //   X = horizontal slide (left/right across frame)
-  //   Y = vertical lift / drop (up = away from fire, down = closer to fire)
-  MOVE_X_RANGE: 1.6,
-  MOVE_Y_RANGE: 1.0,    // bigger range now since we have lots of vertical space
-  MOVE_SMOOTH: 0.12,
 };
 
 // ============================================================
@@ -641,16 +572,11 @@ function createMarshmallowGeom() {
   g.setIndex(new THREE.BufferAttribute(indices, 1));
   g.computeVertexNormals();   // smooth normals across the whole mesh
 
-  // Compute per-vertex 'cookable' mask. A vertex is cookable (curved circumference)
-  // if its normal is mostly perpendicular to the skewer's long axis (Y in this frame).
-  // Cap vertices have normals pointing along Y, so |ny| ~ 1 → not cookable.
-  const normAttr = g.attributes.normal;
+  // All vertices are cookable now — caps included. The player has to actively
+  // tilt the marshmallow to expose the caps to the flame.
   const vCount = positions.length / 3;
   const cookable = new Float32Array(vCount);
-  for (let i = 0; i < vCount; i++) {
-    const ny = Math.abs(normAttr.getY(i));
-    cookable[i] = ny < 0.6 ? 1.0 : 0.0;
-  }
+  for (let i = 0; i < vCount; i++) cookable[i] = 1.0;
   g.setAttribute('cookable', new THREE.BufferAttribute(cookable, 1));
 
   return g;
@@ -859,6 +785,39 @@ let donenessAttr = null;
 let cookableArr = null;
 let igniteThresholds = null;   // per-vertex re-ignition threshold (starts at IGNITE)
 let vertexCount = 0;
+// Neighbor adjacency for heat conduction. Flat encoding:
+//   neighborOffsets[i]   = start index into neighborIndices for vertex i
+//   neighborOffsets[i+1] = end index (exclusive)
+//   neighborIndices[k]   = neighbor vertex id
+let neighborOffsets = null;
+let neighborIndices = null;
+let conductionTmpDoneness = null;   // scratch buffer reused each frame
+
+function buildNeighborAdjacency(geom) {
+  const idx = geom.index.array;
+  const vCount = geom.attributes.position.count;
+  // Use Sets first to dedupe, then flatten
+  const sets = new Array(vCount);
+  for (let i = 0; i < vCount; i++) sets[i] = new Set();
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t], b = idx[t+1], c = idx[t+2];
+    sets[a].add(b); sets[a].add(c);
+    sets[b].add(a); sets[b].add(c);
+    sets[c].add(a); sets[c].add(b);
+  }
+  let totalEdges = 0;
+  for (let i = 0; i < vCount; i++) totalEdges += sets[i].size;
+
+  const offsets = new Uint32Array(vCount + 1);
+  const indices = new Uint32Array(totalEdges);
+  let cursor = 0;
+  for (let i = 0; i < vCount; i++) {
+    offsets[i] = cursor;
+    sets[i].forEach(j => { indices[cursor++] = j; });
+  }
+  offsets[vCount] = cursor;
+  return { offsets, indices };
+}
 
 function buildMarshmallow() {
   if (marshmallow) {
@@ -879,6 +838,12 @@ function buildMarshmallow() {
   igniteThresholds = new Float32Array(vertexCount);
   for (let i = 0; i < vertexCount; i++) igniteThresholds[i] = CONFIG.IGNITE;
 
+  // Build neighbor adjacency once for heat conduction
+  const adj = buildNeighborAdjacency(marshGeom);
+  neighborOffsets = adj.offsets;
+  neighborIndices = adj.indices;
+  conductionTmpDoneness = new Float32Array(vertexCount);
+
   const mat = new THREE.ShaderMaterial({
     vertexShader: marshVertexShader,
     fragmentShader: marshFragmentShader,
@@ -895,90 +860,119 @@ function buildMarshmallow() {
 // ============================================================
 // CONTROLS
 // ============================================================
+// INPUT — drag-anywhere control
+// Drag horizontally to spin the marshmallow around the skewer.
+// Drag vertically to tilt the skewer up/down (clamped to ±80° with rubber-band).
+// Mapping is RELATIVE: when you press, that point becomes "zero". On release the
+// rotations stay where you left them.
+// ============================================================
+const TILT_MAX = 80 * Math.PI / 180;   // ±80° hard limit
+const TILT_RUBBER_PX = 120;            // extra px of drag past limit before fully clamped
+// Sensitivity: full-screen-width drag = ~one full turn; ~1/3 screen height = full tilt range
+function spinSensitivity() { return (Math.PI * 2) / Math.max(600, window.innerWidth); }
+function tiltSensitivity() { return (TILT_MAX * 2) / Math.max(400, window.innerHeight / 3); }
+
 const input = {
-  joy: { x: 0, y: 0 },
-  rotate: 0,
+  spinAngleAtPress: 0,
+  tiltAngleAtPress: 0,
+  pressX: 0,
+  pressY: 0,
+  dragging: false,
 };
 
-(function setupJoystick() {
-  const zone = document.getElementById('joystick-zone');
-  const base = document.getElementById('joystick-base');
-  const stick = document.getElementById('joystick-stick');
-  let active = false;
-  let centerX = 0, centerY = 0;
-  let radius = 50;
-  function start(x, y) {
-    active = true;
-    const rect = base.getBoundingClientRect();
-    centerX = rect.left + rect.width / 2;
-    centerY = rect.top + rect.height / 2;
-    radius = rect.width / 2 - 26;
-    update(x, y);
+(function setupDrag() {
+  const zone = document.getElementById('drag-zone');
+  const hint = document.getElementById('drag-hint');
+
+  function start(x, y, pointerId) {
+    if (state.phase !== 'playing') return;
+    input.dragging = true;
+    input.pressX = x;
+    input.pressY = y;
+    input.spinAngleAtPress = state.spinAngle;
+    input.tiltAngleAtPress = state.tiltAngle;
+    zone.classList.add('dragging');
+    hint.classList.add('faded');
+    try { zone.setPointerCapture(pointerId); } catch (e) {}
   }
+
   function update(x, y) {
-    if (!active) return;
-    let dx = x - centerX, dy = y - centerY;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist > radius) { dx = dx / dist * radius; dy = dy / dist * radius; }
-    stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-    input.joy.x = dx / radius;
-    input.joy.y = dy / radius;
+    if (!input.dragging) return;
+    const dx = x - input.pressX;
+    const dy = y - input.pressY;
+
+    // Spin: unbounded. Right-drag = clockwise (positive), Left-drag = counter-clockwise.
+    state.spinAngle = input.spinAngleAtPress + dx * spinSensitivity();
+
+    // Tilt: clamped with rubber-band. Up-drag (negative dy) tilts one way, down the other.
+    // Compute "raw" target tilt, then apply soft clamp toward the cap when over the limit.
+    const rawTilt = input.tiltAngleAtPress + dy * tiltSensitivity();
+    state.tiltAngle = softClampTilt(rawTilt);
   }
+
   function end() {
-    active = false;
-    stick.style.transform = 'translate(-50%, -50%)';
-    input.joy.x = 0; input.joy.y = 0;
+    if (!input.dragging) return;
+    input.dragging = false;
+    zone.classList.remove('dragging');
+    // Rubber-band release: animate from any over-extended value back to the hard limit.
+    if (state.tiltAngle > TILT_MAX) state.tiltAngle = TILT_MAX;
+    else if (state.tiltAngle < -TILT_MAX) state.tiltAngle = -TILT_MAX;
   }
-  zone.addEventListener('pointerdown', e => { e.preventDefault(); zone.setPointerCapture(e.pointerId); start(e.clientX, e.clientY); });
-  zone.addEventListener('pointermove', e => { if (active) update(e.clientX, e.clientY); });
+
+  function softClampTilt(raw) {
+    if (raw > TILT_MAX) {
+      // raw is over limit; squash the excess
+      const excess = raw - TILT_MAX;
+      const stretchPx = excess / tiltSensitivity();
+      const t = Math.min(1, stretchPx / TILT_RUBBER_PX);
+      // Diminishing returns: the further you drag past, the less it adds
+      return TILT_MAX + (TILT_MAX * 0.18) * (1 - Math.pow(1 - t, 2));
+    }
+    if (raw < -TILT_MAX) {
+      const excess = -TILT_MAX - raw;
+      const stretchPx = excess / tiltSensitivity();
+      const t = Math.min(1, stretchPx / TILT_RUBBER_PX);
+      return -TILT_MAX - (TILT_MAX * 0.18) * (1 - Math.pow(1 - t, 2));
+    }
+    return raw;
+  }
+
+  zone.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    start(e.clientX, e.clientY, e.pointerId);
+  });
+  zone.addEventListener('pointermove', e => update(e.clientX, e.clientY));
   zone.addEventListener('pointerup', end);
   zone.addEventListener('pointercancel', end);
-})();
+  zone.addEventListener('pointerleave', e => { if (e.buttons === 0) end(); });
 
-(function setupRotate() {
-  const leftBtn = document.getElementById('rot-left-btn');
-  const rightBtn = document.getElementById('rot-right-btn');
-
-  let leftHeld = false, rightHeld = false;
-  let lastPressed = 0;
-
-  function applyState() {
-    let dir = 0;
-    if (leftHeld && rightHeld) dir = lastPressed;
-    else if (leftHeld) dir = -1;
-    else if (rightHeld) dir = 1;
-    input.rotate = dir;
-    leftBtn.classList.toggle('active', dir === -1);
-    rightBtn.classList.toggle('active', dir === 1);
-  }
-
-  function bindHold(btn, dir, setHeld) {
-    const press = e => {
-      e.preventDefault();
-      btn.setPointerCapture(e.pointerId);
-      setHeld(true);
-      lastPressed = dir;
-      applyState();
-    };
-    const release = () => { setHeld(false); applyState(); };
-    btn.addEventListener('pointerdown', press);
-    btn.addEventListener('pointerup', release);
-    btn.addEventListener('pointercancel', release);
-    btn.addEventListener('pointerleave', e => { if (e.buttons === 0) release(); });
-  }
-  bindHold(leftBtn, -1, v => leftHeld = v);
-  bindHold(rightBtn, 1, v => rightHeld = v);
-
+  // Keyboard fallback for desktop
+  let keyboardHeld = { left: false, right: false, up: false, down: false };
   document.addEventListener('keydown', e => {
-    if (e.repeat) return;
-    if (e.code === 'ArrowLeft') { leftHeld = true; lastPressed = -1; applyState(); }
-    if (e.code === 'ArrowRight') { rightHeld = true; lastPressed = 1; applyState(); }
+    if (state.phase !== 'playing') return;
+    if (e.code === 'ArrowLeft')  keyboardHeld.left = true;
+    if (e.code === 'ArrowRight') keyboardHeld.right = true;
+    if (e.code === 'ArrowUp')    keyboardHeld.up = true;
+    if (e.code === 'ArrowDown')  keyboardHeld.down = true;
   });
   document.addEventListener('keyup', e => {
-    if (e.code === 'ArrowLeft') { leftHeld = false; applyState(); }
-    if (e.code === 'ArrowRight') { rightHeld = false; applyState(); }
+    if (e.code === 'ArrowLeft')  keyboardHeld.left = false;
+    if (e.code === 'ArrowRight') keyboardHeld.right = false;
+    if (e.code === 'ArrowUp')    keyboardHeld.up = false;
+    if (e.code === 'ArrowDown')  keyboardHeld.down = false;
   });
+  // Apply keyboard input each frame via global hook
+  window._applyKeyboardInput = (dt) => {
+    if (state.phase !== 'playing') return;
+    const SPIN_KEY_SPEED = 2.0;   // rad/sec
+    const TILT_KEY_SPEED = 1.4;   // rad/sec
+    if (keyboardHeld.left)  state.spinAngle -= SPIN_KEY_SPEED * dt;
+    if (keyboardHeld.right) state.spinAngle += SPIN_KEY_SPEED * dt;
+    if (keyboardHeld.up)    state.tiltAngle = Math.max(-TILT_MAX, state.tiltAngle - TILT_KEY_SPEED * dt);
+    if (keyboardHeld.down)  state.tiltAngle = Math.min(TILT_MAX,  state.tiltAngle + TILT_KEY_SPEED * dt);
+  };
 })();
+
 
 // ============================================================
 // GAME STATE
@@ -986,7 +980,7 @@ const input = {
 const state = {
   phase: 'title',
   spinAngle: 0,
-  posX: 0, posY: 0,
+  tiltAngle: 0,
   igniteTime: 0,
   revealTime: 0,
   finalScore: 0,
@@ -1004,7 +998,7 @@ const REST_Z = 0.5;
 function startGame() {
   state.phase = 'playing';
   state.spinAngle = Math.random() * Math.PI * 2;
-  state.posX = 0; state.posY = 0;
+  state.tiltAngle = 0;
   state.igniteTime = 0;
   state.revealTime = 0;
   buildMarshmallow();
@@ -1016,14 +1010,10 @@ function startGame() {
   $('fire-overlay').classList.add('hidden');
 
   $('score-readout').style.opacity = '1';
-  $('joystick-zone').style.opacity = '1';
-  $('rotate-zone').style.opacity = '1';
+  $('drag-zone').classList.remove('hidden');
+  $('drag-hint').classList.remove('faded');
   $('finish-btn').style.opacity = '1';
   $('end-screen').classList.remove('fire-mode');
-
-  input.rotate = 0;
-  document.getElementById('rot-left-btn').classList.remove('active');
-  document.getElementById('rot-right-btn').classList.remove('active');
 }
 
 function startReveal(score) {
@@ -1036,8 +1026,8 @@ function startReveal(score) {
   state.revealStartY = marshGroup.position.y;
   state.revealStartRotX = marshGroup.rotation.x;
   state.revealStartSpinY = marshmallow ? marshmallow.rotation.y : 0;
-  $('joystick-zone').style.opacity = '0';
-  $('rotate-zone').style.opacity = '0';
+  $('drag-zone').classList.add('hidden');
+  $('drag-hint').classList.add('faded');
   $('finish-btn').style.opacity = '0';
   $('score-readout').style.opacity = '0';
 }
@@ -1084,7 +1074,7 @@ function bandFor(score) {
 // raw gives ~30 average instead of the misleading 100 a plain mean would give.
 function vertexScore(doneness) {
   const dist = Math.abs(doneness - 100);
-  return Math.max(0, 100 - 0.7 * dist);
+  return Math.max(0, 100 - 0.55 * dist);
 }
 
 function calcAvg() {
@@ -1126,8 +1116,7 @@ $('blow-btn').addEventListener('click', () => {
 
   // Resume play
   $('fire-overlay').classList.add('hidden');
-  $('joystick-zone').style.opacity = '1';
-  $('rotate-zone').style.opacity = '1';
+  $('drag-zone').classList.remove('hidden');
   $('finish-btn').style.opacity = '1';
   state.phase = 'playing';
 });
@@ -1151,6 +1140,30 @@ function applyHeat(dt) {
   const m = marshmallow.matrixWorld;
   _normalMat.getNormalMatrix(m);
 
+  // ---- HEAT CONDUCTION PASS ----
+  // Each vertex drifts toward the average of its neighbors. Models how heat
+  // spreads inside the marshmallow over time. Helps even out hot/cold spots
+  // so good play (consistent rotation) actually achieves a uniform doneness.
+  // Rate: ~12% per second toward the local mean. Tunable.
+  const CONDUCTION_RATE = 0.12;
+  const conductionAlpha = Math.min(1, CONDUCTION_RATE * dt);
+  if (neighborOffsets) {
+    // First pass: compute target (neighbor average) into scratch buffer
+    for (let i = 0; i < vertexCount; i++) {
+      const start = neighborOffsets[i];
+      const end = neighborOffsets[i + 1];
+      if (end === start) { conductionTmpDoneness[i] = arr[i]; continue; }
+      let s = 0;
+      for (let k = start; k < end; k++) s += arr[neighborIndices[k]];
+      conductionTmpDoneness[i] = s / (end - start);
+    }
+    // Second pass: lerp current toward target
+    for (let i = 0; i < vertexCount; i++) {
+      arr[i] += (conductionTmpDoneness[i] - arr[i]) * conductionAlpha;
+    }
+  }
+
+  // ---- HEAT APPLICATION PASS ----
   let ignited = false;
   let sum = 0;
   let count = 0;
@@ -1175,9 +1188,6 @@ function applyHeat(dt) {
     arr[i] += heat * dt;
     sum += vertexScore(arr[i]);
     count++;
-    // Vertex is "burning" iff its current doneness has crossed its own threshold.
-    // After a successful blow-out, the threshold is bumped up by 20 from current doneness,
-    // so the player gets a 20-point grace window before that area can re-ignite.
     if (arr[i] >= igniteThresholds[i]) {
       ignited = true;
       if (Math.random() < 0.15) {
@@ -1206,32 +1216,22 @@ function animate(t) {
   fireLight.intensity = 5.0 + Math.sin(t * 0.008) * 0.5 + Math.random() * 0.4;
 
   if (state.phase === 'playing') {
-    // Joystick controls position relative to REST
-    // X: left/right slide
-    // Y: up/down (joystick up = lift mallow up away from fire; joystick down = lower toward fire)
-    const targetX = REST_X + input.joy.x * CONFIG.MOVE_X_RANGE;
-    const targetY = REST_Y - input.joy.y * CONFIG.MOVE_Y_RANGE;
-    state.posX += (targetX - state.posX) * CONFIG.MOVE_SMOOTH;
-    state.posY += (targetY - state.posY) * CONFIG.MOVE_SMOOTH;
-    marshGroup.position.x = state.posX;
-    marshGroup.position.y = state.posY;
+    // Apply keyboard input (additive to whatever the drag set)
+    if (window._applyKeyboardInput) window._applyKeyboardInput(dt);
 
-    if (input.rotate !== 0) {
-      state.spinAngle += CONFIG.ROTATE_SPEED * dt * input.rotate;
-    }
+    // Apply rotation/tilt to the scene transforms.
+    // marshGroup.rotation.x base is -π/2 (skewer points toward camera). Tilt adds to that.
+    marshGroup.rotation.x = -Math.PI / 2 + state.tiltAngle;
     if (marshmallow) marshmallow.rotation.y = state.spinAngle;
 
     const result = applyHeat(dt);
     const score = result.avg;
     const scoreEl = $('score-num');
     scoreEl.textContent = Math.round(score);
-    if (score > 130) scoreEl.classList.add('danger');
-    else scoreEl.classList.remove('danger');
 
     if (result.ignited && state.phase === 'playing') {
       state.phase = 'on-fire';
-      $('joystick-zone').style.opacity = '0';
-      $('rotate-zone').style.opacity = '0';
+      $('drag-zone').classList.add('hidden');
       $('finish-btn').style.opacity = '0';
       $('fire-overlay').classList.remove('hidden');
     }
@@ -1275,8 +1275,8 @@ function animate(t) {
 
     // Targets: skewer pointing UP (vertical) means rotation.x goes from -π/2 to -π
     const targetRotX = -Math.PI;
-    const targetX = -1.6;     // left side of frame in world units
-    const targetY = REST_Y;   // stay at same vertical position
+    const targetX = -1.1;     // sits at ~30% of viewport, mirroring score at ~70%
+    const targetY = REST_Y;
 
     marshGroup.rotation.x = state.revealStartRotX + (targetRotX - state.revealStartRotX) * e;
     marshGroup.position.x = state.revealStartX + (targetX - state.revealStartX) * e;
@@ -1317,10 +1317,10 @@ $('restart-btn').addEventListener('click', () => {
 });
 
 $('score-readout').style.opacity = '0';
-$('joystick-zone').style.opacity = '0';
-$('rotate-zone').style.opacity = '0';
+$('drag-zone').classList.add('hidden');
+$('drag-hint').classList.add('faded');
 $('finish-btn').style.opacity = '0';
-['score-readout', 'joystick-zone', 'rotate-zone', 'finish-btn'].forEach(id => {
+['score-readout', 'finish-btn'].forEach(id => {
   $(id).style.transition = 'opacity 0.5s';
 });
 
