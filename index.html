@@ -1051,9 +1051,24 @@ function bandFor(score) {
 //
 // This punishes uneven cooking: burning one side to 200 and leaving the other
 // raw gives ~30 average instead of the misleading 100 a plain mean would give.
+// Per-vertex score curve:
+//   - Plateau of 100 within ±8 of perfect (so a vertex doesn't have to be EXACTLY
+//     100 to count as fully cooked — anything 92-108 is "just right")
+//   - Outside the plateau: steep linear drop with slope 1.2, clamped at 0
+//
+// Result:
+//   - Raw (doneness 0):     score 0    (no freebies for not cooking)
+//   - Burned (doneness 200): score 0   (no freebies for cremating)
+//   - Perfect (90-110):      score 100
+//   - Decent (80-120):       score ~86
+//   - Half-cooked (50-150):  score ~50
+//   - Means a uniform marshmallow at the right level can plausibly hit 100,
+//     while uneven or wrong-level cooking falls off fast.
 function vertexScore(doneness) {
   const dist = Math.abs(doneness - 100);
-  return Math.max(0, 100 - 0.55 * dist);
+  const plateau = 8;
+  if (dist <= plateau) return 100;
+  return Math.max(0, 100 - 1.2 * (dist - plateau));
 }
 
 function calcAvg() {
