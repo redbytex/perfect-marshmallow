@@ -1066,15 +1066,14 @@ function showFinalScreen() {
 
 // Scoring bands with emoji
 function bandFor(score) {
-  if (score < 51)  return { label: "It's still cold!", emoji: '🥶', cls: 'b-cold' };
-  if (score < 70)  return { label: "Uh, it's barely warm", emoji: '😳', cls: 'b-cool' };
-  if (score < 85)  return { label: "Needs a little more", emoji: '🥉', cls: 'b-bronze' };
-  if (score < 98)  return { label: "Nearly perfect", emoji: '🥈', cls: 'b-silver' };
-  if (score < 103) return { label: "Perfect!", emoji: '🥇', cls: 'b-perfect' };
-  if (score < 111) return { label: "Almost perfect", emoji: '🥈', cls: 'b-silver' };
-  if (score < 131) return { label: "Uh, that's crispy", emoji: '🥉', cls: 'b-bronze' };
-  if (score < 151) return { label: "Too burned!", emoji: '😬', cls: 'b-burned' };
-  return { label: "NO THANKS!", emoji: '🤮', cls: 'b-yuck' };
+  const s = Math.round(score);
+  if (s < 51)  return { label: "Terrible!",        emoji: '😰',    cls: 'b-cold' };
+  if (s < 71)  return { label: "You can do better!", emoji: '🫣',  cls: 'b-cool' };
+  if (s < 81)  return { label: "Just okay",        emoji: '😑',    cls: 'b-bronze' };
+  if (s < 91)  return { label: "Pretty good",      emoji: '😊',    cls: 'b-silver' };
+  if (s < 96)  return { label: "Great",            emoji: '😄',    cls: 'b-silver' };
+  if (s < 100) return { label: "Amazing!",         emoji: '😲',    cls: 'b-perfect' };
+  return       { label: "PERFECT",                  emoji: '😎🤘', cls: 'b-perfect' };
 }
 
 // New score function: each vertex contributes its closeness to "perfect" (100),
@@ -1283,12 +1282,17 @@ function animate(t) {
     marshGroup.position.x = state.revealStartX + (targetX - state.revealStartX) * e;
     marshGroup.position.y = state.revealStartY + (targetY - state.revealStartY) * e;
 
-    // Stop the live spin during reveal — keep at whatever angle it was
-    if (marshmallow) marshmallow.rotation.y = state.revealStartSpinY;
+    // Keep slowly rotating the marshmallow around the skewer so it stays alive
+    state.spinAngle += 0.5 * dt;
+    if (marshmallow) marshmallow.rotation.y = state.spinAngle;
 
     if (state.revealTime >= CONFIG.REVEAL_DURATION) {
       showFinalScreen();
     }
+  } else if (state.phase === 'end') {
+    // Keep rotating the marshmallow around its skewer on the score screen
+    state.spinAngle += 0.5 * dt;
+    if (marshmallow) marshmallow.rotation.y = state.spinAngle;
   }
 
   // Always update fire particles. Each sprite manages its own visibility.
