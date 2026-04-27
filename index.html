@@ -177,7 +177,7 @@
     letter-spacing: 0.5em;
   }
 
-  #title-screen, #end-screen {
+  #title-screen {
     position: fixed;
     inset: 0;
     background: rgba(5, 8, 16, 0.92);
@@ -191,6 +191,30 @@
     text-align: center;
     padding: 40px;
     transition: opacity 0.6s;
+  }
+  /* End-screen is anchored to the right half so the rotated marshmallow
+     stays visible on the left half of the canvas. */
+  #end-screen {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 50vw;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+    padding: 40px;
+    background: rgba(5, 8, 16, 0);
+    transform: translateX(0);
+    transition: transform 0.7s cubic-bezier(.4, 0, .2, 1), opacity 0.5s;
+  }
+  #end-screen.hidden {
+    transform: translateX(110%);
+    opacity: 0;
+    pointer-events: none;
   }
   .screen-title {
     font-family: 'Cormorant Garamond', serif;
@@ -243,14 +267,13 @@
 
   #end-screen { background: rgba(0, 0, 0, 0); backdrop-filter: none; -webkit-backdrop-filter: none; }
   #end-screen .end-card {
-    background: rgba(5, 8, 16, 0.78);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    padding: 48px 56px;
-    border: 1px solid rgba(244, 228, 193, 0.15);
+    background: transparent;
+    padding: 24px;
+    border: none;
     display: flex;
     flex-direction: column;
     align-items: center;
+    max-width: 100%;
   }
   #end-emoji {
     font-size: clamp(80px, 16vw, 140px);
@@ -428,10 +451,9 @@ const MESH_DATA = {"skewer":{"positions":[0.0002,0.0004,0.0457,0.0002,-3.6658,0.
 
 const CONFIG = {
   IGNITE: 150,
-  HEAT_RATE: 27,
+  HEAT_RATE: 54,
   ROTATE_SPEED: 1.4,
-  REVEAL_SPIN_SPEED: 0.6,
-  REVEAL_DURATION: 2.2,
+  REVEAL_DURATION: 1.0,
   // Joystick maps to position in the world. From the low first-person POV:
   //   X = horizontal slide (left/right across frame)
   //   Y = vertical lift / drop (up = away from fire, down = closer to fire)
@@ -988,6 +1010,7 @@ function startGame() {
   buildMarshmallow();
   marshmallow.rotation.y = state.spinAngle;
   marshGroup.position.set(REST_X, REST_Y, REST_Z);
+  marshGroup.rotation.x = -Math.PI / 2;   // reset from any reveal-rotation
 
   clearFireParticles();
   $('fire-overlay').classList.add('hidden');
@@ -1008,6 +1031,11 @@ function startReveal(score) {
   state.revealTime = 0;
   state.finalScore = score;
   state.finalBand = bandFor(score);
+  // Capture starting transform so we can ease to the final pose
+  state.revealStartX = marshGroup.position.x;
+  state.revealStartY = marshGroup.position.y;
+  state.revealStartRotX = marshGroup.rotation.x;
+  state.revealStartSpinY = marshmallow ? marshmallow.rotation.y : 0;
   $('joystick-zone').style.opacity = '0';
   $('rotate-zone').style.opacity = '0';
   $('finish-btn').style.opacity = '0';
@@ -1049,13 +1077,24 @@ function bandFor(score) {
   return { label: "NO THANKS!", emoji: '🤮', cls: 'b-yuck' };
 }
 
+// New score function: each vertex contributes its closeness to "perfect" (100),
+// not its raw doneness. So a vertex at 100 scores 100, a vertex at 50 OR 150
+// scores 65, a vertex at 0 OR 200 scores 30. Mean over all cookable vertices.
+//
+// This punishes uneven cooking: burning one side to 200 and leaving the other
+// raw gives ~30 average instead of the misleading 100 a plain mean would give.
+function vertexScore(doneness) {
+  const dist = Math.abs(doneness - 100);
+  return Math.max(0, 100 - 0.7 * dist);
+}
+
 function calcAvg() {
   const arr = donenessAttr.array;
   let sum = 0;
   let count = 0;
   for (let i = 0; i < vertexCount; i++) {
     if (cookableArr[i] > 0.5) {
-      sum += arr[i];
+      sum += vertexScore(arr[i]);
       count++;
     }
   }
@@ -1135,7 +1174,7 @@ function applyHeat(dt) {
     heat *= (0.9 + Math.random() * 0.2);
 
     arr[i] += heat * dt;
-    sum += arr[i];
+    sum += vertexScore(arr[i]);
     count++;
     // Vertex is "burning" iff its current doneness has crossed its own threshold.
     // After a successful blow-out, the threshold is bumped up by 20 from current doneness,
@@ -1229,15 +1268,25 @@ function animate(t) {
       }
     }
   } else if (state.phase === 'reveal') {
-    state.spinAngle += CONFIG.REVEAL_SPIN_SPEED * dt;
-    if (marshmallow) marshmallow.rotation.y = state.spinAngle;
-    state.posX += (REST_X - state.posX) * 0.15;
-    state.posY += ((REST_Y + 0.4) - state.posY) * 0.15;
-    marshGroup.position.x = state.posX;
-    marshGroup.position.y = state.posY;
-
     state.revealTime += dt;
-    if (state.revealTime > CONFIG.REVEAL_DURATION) {
+    // Ease from start pose (wherever the marshmallow was when player tapped Finish)
+    // to final pose (vertical, left side of frame). Cubic ease-out.
+    const t = Math.min(1, state.revealTime / CONFIG.REVEAL_DURATION);
+    const e = 1 - Math.pow(1 - t, 3);
+
+    // Targets: skewer pointing UP (vertical) means rotation.x goes from -π/2 to -π
+    const targetRotX = -Math.PI;
+    const targetX = -1.6;     // left side of frame in world units
+    const targetY = REST_Y;   // stay at same vertical position
+
+    marshGroup.rotation.x = state.revealStartRotX + (targetRotX - state.revealStartRotX) * e;
+    marshGroup.position.x = state.revealStartX + (targetX - state.revealStartX) * e;
+    marshGroup.position.y = state.revealStartY + (targetY - state.revealStartY) * e;
+
+    // Stop the live spin during reveal — keep at whatever angle it was
+    if (marshmallow) marshmallow.rotation.y = state.revealStartSpinY;
+
+    if (state.revealTime >= CONFIG.REVEAL_DURATION) {
       showFinalScreen();
     }
   }
