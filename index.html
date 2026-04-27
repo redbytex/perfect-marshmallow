@@ -487,110 +487,72 @@ scene.add(rimLight);
 const FLAME_POS = new THREE.Vector3(0, -0.3, 0.5);
 
 // ============================================================
-// FIRE PARTICLE SYSTEM
-// Used for emitting glowing particles from burning marshmallow areas
+// FIRE PARTICLE SYSTEM (Sprite-based for cross-platform compat)
+// iOS Safari has known issues with THREE.Points + gl_PointCoord that produce
+// glitchy squares. Sprites use textured quads with proper UVs and work everywhere.
 // ============================================================
-const FIRE_PARTICLE_MAX = 200;
-const fireParticleGeom = new THREE.BufferGeometry();
-const fireParticlePositions = new Float32Array(FIRE_PARTICLE_MAX * 3);
-const fireParticleColors = new Float32Array(FIRE_PARTICLE_MAX * 3);
-const fireParticleSizes = new Float32Array(FIRE_PARTICLE_MAX);
-fireParticleGeom.setAttribute('position', new THREE.BufferAttribute(fireParticlePositions, 3));
-fireParticleGeom.setAttribute('color', new THREE.BufferAttribute(fireParticleColors, 3));
-fireParticleGeom.setAttribute('size', new THREE.BufferAttribute(fireParticleSizes, 1));
+const FIRE_PARTICLE_MAX = 60;
 
-// Per-particle state (CPU side)
-const fireParticleState = [];
-for (let i = 0; i < FIRE_PARTICLE_MAX; i++) {
-  fireParticleState.push({ alive: false, life: 0, maxLife: 1, vx: 0, vy: 0, vz: 0 });
-  fireParticlePositions[i*3] = 0;
-  fireParticlePositions[i*3+1] = 0;
-  fireParticlePositions[i*3+2] = 0;
-  fireParticleSizes[i] = 0;
-}
-
-// Build a soft radial gradient texture for the particles. Using a texture instead
-// of computing the falloff in the fragment shader avoids GPU-specific issues with
-// gl_PointCoord precision when point sizes get clamped (which causes raw squares
-// to appear on Apple Silicon and some mobile GPUs).
+// Build a soft radial gradient texture for the flame puffs
 const fireParticleTexture = (() => {
   const c = document.createElement('canvas');
-  c.width = c.height = 64;
+  c.width = c.height = 128;
   const ctx = c.getContext('2d');
-  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-  g.addColorStop(0,    'rgba(255, 255, 255, 1.0)');
-  g.addColorStop(0.3,  'rgba(255, 220, 160, 0.9)');
-  g.addColorStop(0.6,  'rgba(255, 130, 50, 0.4)');
-  g.addColorStop(1.0,  'rgba(255, 80, 20, 0.0)');
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0,    'rgba(255, 255, 240, 1.0)');
+  g.addColorStop(0.25, 'rgba(255, 220, 140, 0.8)');
+  g.addColorStop(0.55, 'rgba(255, 130, 40, 0.35)');
+  g.addColorStop(1.0,  'rgba(255, 80, 10, 0.0)');
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 64, 64);
+  ctx.fillRect(0, 0, 128, 128);
   const tex = new THREE.CanvasTexture(c);
   tex.minFilter = THREE.LinearFilter;
   tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
   return tex;
 })();
 
-// Custom shader for billboarded glowing additive particles
-const fireParticleMat = new THREE.ShaderMaterial({
-  uniforms: {
-    uPixelRatio: { value: renderer.getPixelRatio() },
-    uTex: { value: fireParticleTexture },
-  },
-  vertexShader: `
-    attribute float size;
-    attribute vec3 color;
-    varying vec3 vColor;
-    uniform float uPixelRatio;
-    void main() {
-      vColor = color;
-      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-      gl_Position = projectionMatrix * mvPosition;
-      // If size is 0, force gl_PointSize to 0 so dead particles never render at all.
-      // Otherwise cap to safe range for cross-GPU compat.
-      float ps = size * uPixelRatio * (180.0 / -mvPosition.z);
-      gl_PointSize = size > 0.01 ? clamp(ps, 1.0, 60.0) : 0.0;
-    }
-  `,
-  fragmentShader: `
-    uniform sampler2D uTex;
-    varying vec3 vColor;
-    void main() {
-      // Sample the radial gradient texture using gl_PointCoord
-      vec4 t = texture2D(uTex, gl_PointCoord);
-      // Tint by per-particle color, keep texture's alpha
-      gl_FragColor = vec4(vColor * t.rgb, t.a);
-    }
-  `,
-  blending: THREE.AdditiveBlending,
-  depthWrite: false,
-  transparent: true,
-  vertexColors: true,
-});
-
-const fireParticles = new THREE.Points(fireParticleGeom, fireParticleMat);
-fireParticles.visible = false;   // hidden until any particle is actually alive
-fireParticles.frustumCulled = false;
-scene.add(fireParticles);
+// Pool of Sprite objects — one per particle slot
+const fireSprites = [];
+const fireParticleState = [];
+for (let i = 0; i < FIRE_PARTICLE_MAX; i++) {
+  const mat = new THREE.SpriteMaterial({
+    map: fireParticleTexture,
+    color: 0xffffff,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0, 0, 0);
+  sprite.visible = false;
+  scene.add(sprite);
+  fireSprites.push(sprite);
+  fireParticleState.push({ alive: false, life: 0, maxLife: 1, vx: 0, vy: 0, vz: 0, baseScale: 0 });
+}
 
 function spawnFireParticle(x, y, z) {
-  // Find a dead slot
   for (let i = 0; i < FIRE_PARTICLE_MAX; i++) {
-    if (!fireParticleState[i].alive) {
-      fireParticleState[i].alive = true;
-      fireParticleState[i].life = 0;
-      fireParticleState[i].maxLife = 0.6 + Math.random() * 0.5;
-      // Initial velocity: mostly upward, slight outward jitter
-      fireParticleState[i].vx = (Math.random() - 0.5) * 0.4;
-      fireParticleState[i].vy = 0.8 + Math.random() * 0.6;
-      fireParticleState[i].vz = (Math.random() - 0.5) * 0.4;
-      fireParticlePositions[i*3] = x + (Math.random() - 0.5) * 0.05;
-      fireParticlePositions[i*3+1] = y + (Math.random() - 0.5) * 0.05;
-      fireParticlePositions[i*3+2] = z + (Math.random() - 0.5) * 0.05;
-      // Hot bright color at spawn
-      fireParticleColors[i*3] = 1.0;
-      fireParticleColors[i*3+1] = 0.7;
-      fireParticleColors[i*3+2] = 0.2;
-      fireParticleSizes[i] = 18 + Math.random() * 12;
+    const p = fireParticleState[i];
+    if (!p.alive) {
+      p.alive = true;
+      p.life = 0;
+      p.maxLife = 0.6 + Math.random() * 0.5;
+      p.vx = (Math.random() - 0.5) * 0.4;
+      p.vy = 0.8 + Math.random() * 0.6;
+      p.vz = (Math.random() - 0.5) * 0.4;
+      p.baseScale = 0.5 + Math.random() * 0.3;
+
+      const sprite = fireSprites[i];
+      sprite.position.set(
+        x + (Math.random() - 0.5) * 0.05,
+        y + (Math.random() - 0.5) * 0.05,
+        z + (Math.random() - 0.5) * 0.05
+      );
+      sprite.scale.set(p.baseScale, p.baseScale, 1);
+      sprite.material.color.setRGB(1.0, 0.7, 0.2);
+      sprite.material.opacity = 1.0;
+      sprite.visible = true;
       return;
     }
   }
@@ -603,37 +565,44 @@ function updateFireParticles(dt) {
     if (!p.alive) continue;
     anyAlive = true;
     p.life += dt;
+    const sprite = fireSprites[i];
+
     if (p.life >= p.maxLife) {
       p.alive = false;
-      fireParticleSizes[i] = 0;
+      sprite.visible = false;
+      sprite.scale.set(0, 0, 0);
       continue;
     }
+
     const t = p.life / p.maxLife;
-    // Update position
-    fireParticlePositions[i*3]     += p.vx * dt;
-    fireParticlePositions[i*3 + 1] += p.vy * dt;
-    fireParticlePositions[i*3 + 2] += p.vz * dt;
-    // Slow down vertical velocity slightly (drag)
+    // Move
+    sprite.position.x += p.vx * dt;
+    sprite.position.y += p.vy * dt;
+    sprite.position.z += p.vz * dt;
+    // Drag on vertical velocity
     p.vy *= 0.98;
-    // Color shifts from yellow-hot to red-orange to dim red as it ages
-    fireParticleColors[i*3]     = 1.0;
-    fireParticleColors[i*3 + 1] = 0.7 * (1 - t * 0.7);
-    fireParticleColors[i*3 + 2] = 0.2 * (1 - t);
-    // Size shrinks over time
-    fireParticleSizes[i] = (18 + Math.random() * 4) * (1 - t * 0.7);
+    // Color shift: bright yellow → red-orange → dim red
+    sprite.material.color.setRGB(
+      1.0,
+      0.7 * (1 - t * 0.7),
+      0.2 * (1 - t)
+    );
+    // Fade out alpha as it ages, sharpest in last third of life
+    sprite.material.opacity = 1.0 - t * t;
+    // Size grows slightly then shrinks
+    const sizeT = Math.sin(t * Math.PI);   // bell curve, 0 → 1 → 0
+    const s = p.baseScale * (0.6 + 0.6 * sizeT);
+    sprite.scale.set(s, s, 1);
   }
-  fireParticleGeom.attributes.position.needsUpdate = true;
-  fireParticleGeom.attributes.color.needsUpdate = true;
-  fireParticleGeom.attributes.size.needsUpdate = true;
   return anyAlive;
 }
 
 function clearFireParticles() {
   for (let i = 0; i < FIRE_PARTICLE_MAX; i++) {
     fireParticleState[i].alive = false;
-    fireParticleSizes[i] = 0;
+    fireSprites[i].visible = false;
+    fireSprites[i].scale.set(0, 0, 0);
   }
-  fireParticleGeom.attributes.size.needsUpdate = true;
 }
 
 
@@ -1100,14 +1069,18 @@ $('finish-btn').addEventListener('click', () => {
 
 $('blow-btn').addEventListener('click', () => {
   if (state.phase !== 'on-fire') return;
-  // For every currently-burning vertex, raise its ignite threshold by 20 above
-  // its current doneness. The score is NOT clamped — it just stops igniting until
-  // that area heats up by another 20 points beyond its current value.
+  // Raise the ignite threshold for every cookable vertex by 20 above its current
+  // doneness — but only where this would be an INCREASE (so cold vertices stay at
+  // their original 150 threshold).
+  // This gives the player a 20-point grace window across the whole "hot zone",
+  // not just the patch that was actively burning. Otherwise a vertex sitting at
+  // 149 would re-ignite the next frame.
   const arr = donenessAttr.array;
   for (let i = 0; i < vertexCount; i++) {
     if (cookableArr[i] < 0.5) continue;
-    if (arr[i] >= igniteThresholds[i]) {
-      igniteThresholds[i] = arr[i] + 20;
+    const newThreshold = arr[i] + 20;
+    if (newThreshold > igniteThresholds[i]) {
+      igniteThresholds[i] = newThreshold;
     }
   }
   // Clear all particles
@@ -1269,11 +1242,8 @@ function animate(t) {
     }
   }
 
-  // Always update fire particles. Toggle visibility based on whether any are alive
-  // so the renderer skips them entirely when the marshmallow isn't burning — this
-  // prevents any GPU-state glitches from showing dead particles as squares.
-  const anyAlive = updateFireParticles(dt);
-  fireParticles.visible = anyAlive;
+  // Always update fire particles. Each sprite manages its own visibility.
+  updateFireParticles(dt);
 
   renderer.render(scene, camera);
 }
