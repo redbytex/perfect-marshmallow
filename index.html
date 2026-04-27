@@ -509,10 +509,32 @@ for (let i = 0; i < FIRE_PARTICLE_MAX; i++) {
   fireParticleSizes[i] = 0;
 }
 
+// Build a soft radial gradient texture for the particles. Using a texture instead
+// of computing the falloff in the fragment shader avoids GPU-specific issues with
+// gl_PointCoord precision when point sizes get clamped (which causes raw squares
+// to appear on Apple Silicon and some mobile GPUs).
+const fireParticleTexture = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0,    'rgba(255, 255, 255, 1.0)');
+  g.addColorStop(0.3,  'rgba(255, 220, 160, 0.9)');
+  g.addColorStop(0.6,  'rgba(255, 130, 50, 0.4)');
+  g.addColorStop(1.0,  'rgba(255, 80, 20, 0.0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  return tex;
+})();
+
 // Custom shader for billboarded glowing additive particles
 const fireParticleMat = new THREE.ShaderMaterial({
   uniforms: {
     uPixelRatio: { value: renderer.getPixelRatio() },
+    uTex: { value: fireParticleTexture },
   },
   vertexShader: `
     attribute float size;
@@ -523,19 +545,20 @@ const fireParticleMat = new THREE.ShaderMaterial({
       vColor = color;
       vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
       gl_Position = projectionMatrix * mvPosition;
-      gl_PointSize = size * uPixelRatio * (300.0 / -mvPosition.z);
+      // If size is 0, force gl_PointSize to 0 so dead particles never render at all.
+      // Otherwise cap to safe range for cross-GPU compat.
+      float ps = size * uPixelRatio * (180.0 / -mvPosition.z);
+      gl_PointSize = size > 0.01 ? clamp(ps, 1.0, 60.0) : 0.0;
     }
   `,
   fragmentShader: `
+    uniform sampler2D uTex;
     varying vec3 vColor;
     void main() {
-      // Soft circular falloff from center
-      vec2 uv = gl_PointCoord - 0.5;
-      float d = length(uv);
-      float alpha = smoothstep(0.5, 0.0, d);
-      // Hot core: brighter at center
-      vec3 col = vColor + vec3(0.6, 0.4, 0.1) * (1.0 - d * 2.0);
-      gl_FragColor = vec4(col, alpha);
+      // Sample the radial gradient texture using gl_PointCoord
+      vec4 t = texture2D(uTex, gl_PointCoord);
+      // Tint by per-particle color, keep texture's alpha
+      gl_FragColor = vec4(vColor * t.rgb, t.a);
     }
   `,
   blending: THREE.AdditiveBlending,
@@ -545,6 +568,8 @@ const fireParticleMat = new THREE.ShaderMaterial({
 });
 
 const fireParticles = new THREE.Points(fireParticleGeom, fireParticleMat);
+fireParticles.visible = false;   // hidden until any particle is actually alive
+fireParticles.frustumCulled = false;
 scene.add(fireParticles);
 
 function spawnFireParticle(x, y, z) {
@@ -1244,8 +1269,11 @@ function animate(t) {
     }
   }
 
-  // Always update fire particles
-  updateFireParticles(dt);
+  // Always update fire particles. Toggle visibility based on whether any are alive
+  // so the renderer skips them entirely when the marshmallow isn't burning — this
+  // prevents any GPU-state glitches from showing dead particles as squares.
+  const anyAlive = updateFireParticles(dt);
+  fireParticles.visible = anyAlive;
 
   renderer.render(scene, camera);
 }
